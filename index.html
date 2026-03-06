@@ -242,6 +242,7 @@ function addGame(name) {
   games.push(g);
   renderAllTabs();
   switchGame(g.id);
+  saveState();
   return g;
 }
 
@@ -254,6 +255,7 @@ function removeGame(id) {
     renderAllTabs();
     switchGame(games[games.length-1].id);
   }
+  saveState();
 }
 
 function switchGame(id) {
@@ -340,7 +342,7 @@ function renderGameView(id) {
       </div>
       <div class="flex gap-2">
         <button class="btn btn-primary" onclick="switchInnerTab(${id},'grid')">Go to Grid →</button>
-        ${games.length>1?`<button class="btn btn-danger btn-sm" onclick="removeGame(${id})">Delete Game</button>`:''}
+        <button class="btn btn-danger btn-sm" onclick="endGame(${id})">🗑 End Game</button>
       </div>
     </div>
 
@@ -365,7 +367,7 @@ function renderGameView(id) {
       <div class="scoreboard" id="scoreboard-${id}">
         <div class="scoreboard-title">🤖 SCORE BOT</div>
         <div class="flex gap-2 items-center" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-          <input type="text" id="botq-${id}" placeholder='e.g. "Lakers vs Celtics"' style="flex:1;min-width:160px;margin-bottom:0;" value="${escHtml(g.botQuery)}" oninput="getGame(${id}).botQuery=this.value">
+          <input type="text" id="botq-${id}" placeholder='e.g. Lakers vs Celtics or Cowboys vs Eagles' style="flex:1;min-width:160px;margin-bottom:0;" value="${escHtml(g.botQuery)}" oninput="getGame(${id}).botQuery=this.value">
           <select id="botint-${id}" style="width:110px;margin-bottom:0;" onchange="setBotInterval(${id},parseInt(this.value))">
             <option value="5">Every 5 min</option>
             <option value="10" selected>Every 10 min</option>
@@ -390,7 +392,7 @@ function renderGameView(id) {
             </div>
           </div>
         </div>
-        <div id="botstatus-${id}" style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Bot stopped</div>
+        <div id="botstatus-${id}" style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Enter a team matchup above and hit Start — scores update automatically</div>
       </div>
 
       <!-- QUARTER SELECTOR -->
@@ -466,6 +468,7 @@ function updateGameName(id) {
   g.name = val;
   g.nameManual = true; // user explicitly set it
   renderAllTabs();
+  saveState();
 }
 
 // Known abbreviations for common teams
@@ -546,6 +549,7 @@ function autoTabName(id) {
   const nameEl = document.getElementById('gname-'+id);
   if(nameEl) nameEl.value = g.name;
   renderAllTabs();
+  saveState();
 }
 
 function syncTeams(id) {
@@ -557,6 +561,7 @@ function syncTeams(id) {
   if(slA) slA.textContent = g.teamA;
   if(slB) slB.textContent = g.teamB;
   autoTabName(id);
+  saveState();
 }
 
 function renderPairs(id) {
@@ -574,6 +579,7 @@ function randomizeNums(id) {
   g.rowOrder = shuffle([0,1,2,3,4]);
   renderPairs(id);
   renderGrid(id);
+  saveState();
 }
 
 function resetNums(id) {
@@ -582,6 +588,7 @@ function resetNums(id) {
   g.rowOrder = [0,1,2,3,4];
   renderPairs(id);
   renderGrid(id);
+  saveState();
 }
 
 function addPlayer(id) {
@@ -592,18 +599,21 @@ function addPlayer(id) {
   g.players.push(name);
   inp.value = '';
   renderPlayersList(id);
+  saveState();
 }
 
 function removePlayer(id, idx) {
   const g = getGame(id);
   g.players.splice(idx,1);
   renderPlayersList(id);
+  saveState();
 }
 
 function clearPlayers(id) {
   if(!confirm('Remove all players?')) return;
   getGame(id).players = [];
   renderPlayersList(id);
+  saveState();
 }
 
 function renderPlayersList(id) {
@@ -623,6 +633,7 @@ function autoFill(id) {
   shuffle(empties).forEach(([r,c],i) => { g.grid[r][c] = g.players[i % g.players.length]; });
   renderPlayersList(id);
   renderGrid(id);
+  saveState();
 }
 
 function clearGrid(id) {
@@ -631,6 +642,7 @@ function clearGrid(id) {
   g.grid = Array(5).fill(null).map(()=>Array(5).fill(''));
   renderGrid(id);
   renderPlayersList(id);
+  saveState();
 }
 
 // ════════════════════════════════════════════════
@@ -718,6 +730,7 @@ function confirmAssign(){
   document.getElementById('assignModal').style.display='none';
   pendingSquare=null;
   renderGrid(id); renderPlayersList(id);
+  saveState();
 }
 
 // ════════════════════════════════════════════════
@@ -814,6 +827,7 @@ function lockQuarter(id) {
   renderHistory(id);
   if(g.currentQuarter<4) setQuarter(id, g.currentQuarter+1);
   refreshScoreUI(id);
+  saveState();
 }
 
 // ════════════════════════════════════════════════
@@ -842,6 +856,7 @@ function setBotInterval(id, mins) {
   const g=getGame(id);
   g.botIntervalMins=mins;
   if(g.botRunning) restartBotTimer(id);
+  saveState();
 }
 
 function toggleBot(id) {
@@ -921,43 +936,83 @@ async function runBotNow(id) {
     handleBotResult(id,result);
     setBotStatus(id,`Updated ${new Date().toLocaleTimeString()}`, 'var(--win)');
   } catch(e) {
-    setBotStatus(id,'Search failed — will retry','#e57373');
+    setBotStatus(id,'Failed: '+(e.message||'unknown error'),'#e57373');
     console.warn('Bot error:',e);
   }
   if(g.botRunning) restartBotTimer(id);
 }
 
-async function fetchScore(query) {
-  const sys=`You are a sports score bot. Search for the CURRENT live or most recent score of the game requested.
-Return ONLY a JSON object, no markdown, no explanation.
-{
-  "teamA": "Away team",
-  "teamB": "Home team",
-  "scoreA": 104,
-  "scoreB": 98,
-  "period": "Q3",
-  "clock": "4:32",
-  "status": "in progress",
-  "summary": "One line summary"
+// ── Backend URL ──
+const BACKEND = 'https://squares-backend-production.up.railway.app';
+
+// ESPN sport path lookup — matches team names to the right league
+const SPORT_PATHS = [
+  { path: 'basketball/nba', keywords: ['lakers','celtics','warriors','nets','knicks','bulls','heat','spurs','mavs','mavericks','nuggets','bucks','sixers','76ers','suns','clippers','jazz','rockets','pelicans','grizzlies','timberwolves','blazers','kings','magic','raptors','hawks','hornets','cavaliers','pistons','pacers','thunder','wizards','trail blazers'] },
+  { path: 'basketball/mens-college-basketball', keywords: ['duke','carolina','kentucky','kansas','michigan','iowa','indiana','purdue','gonzaga','villanova','uconn','syracuse','louisville','uva','virginia','ohio state','notre dame','ucla','usc','arizona','florida','alabama','tennessee','arkansas','lsu','baylor','ncaa'] },
+  { path: 'football/nfl', keywords: ['chiefs','eagles','cowboys','patriots','packers','bears','giants','jets','bills','dolphins','ravens','steelers','browns','bengals','texans','colts','jaguars','titans','broncos','raiders','chargers','rams','49ers','seahawks','cardinals','falcons','saints','panthers','buccaneers','commanders','vikings','lions','football'] },
+  { path: 'football/college-football', keywords: ['college football','cfb','sec','big ten','acc','big 12','pac-12'] },
+];
+
+function detectSport(query) {
+  const q = query.toLowerCase();
+  for (const sport of SPORT_PATHS) {
+    if (sport.keywords.some(k => q.includes(k))) return sport.path;
+  }
+  return 'basketball/nba'; // default
 }
-status must be exactly one of: "not started","in progress","halftime","end of q1","end of q2","end of q3","final"
-Return ONLY valid JSON.`;
-  const resp=await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      model:'claude-sonnet-4-20250514',max_tokens:800,
-      tools:[{type:'web_search_20250305',name:'web_search'}],
-      system:sys,
-      messages:[{role:'user',content:`Current score: ${query}`}]
-    })
-  });
-  const data=await resp.json();
-  const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
-  const clean=text.replace(/```json|```/g,'').trim();
-  const s=clean.indexOf('{'),e=clean.lastIndexOf('}');
-  if(s===-1||e===-1) throw new Error('No JSON: '+clean.slice(0,150));
-  return JSON.parse(clean.slice(s,e+1));
+
+async function fetchScore(query) {
+  const sport = detectSport(query);
+  const resp = await fetch(`${BACKEND}/scores?sport=${encodeURIComponent(sport)}`);
+  if (!resp.ok) throw new Error('Backend error: ' + resp.status);
+  const data = await resp.json();
+  const games = data.games || [];
+
+  // Try to find the specific game the user asked about
+  const q = query.toLowerCase().trim();
+  const words = q.split(/\s+vs\.?\s+|\s+@\s+|\s+at\s+/).map(s => s.trim());
+
+  // Score each game by how well it matches the query
+  let bestGame = null, bestScore = 0;
+  for (const game of games) {
+    const haystack = (game.homeTeam + ' ' + game.awayTeam + ' ' + game.homeAbbr + ' ' + game.awayAbbr + ' ' + game.shortName).toLowerCase();
+    let score = 0;
+    words.forEach(w => { if(w.length > 2 && haystack.includes(w)) score++; });
+    // Bonus for live games
+    if (game.inProgress) score += 0.5;
+    if (score > bestScore) { bestScore = score; bestGame = game; }
+  }
+
+  if (!bestGame && games.length > 0) {
+    // If no match found, return all games as a list so user can see what's available
+    throw new Error('Game not found. Available: ' + games.map(g => g.shortName).join(', '));
+  }
+  if (!bestGame) throw new Error('No games found for ' + sport);
+
+  // Map ESPN status to our standard status values
+  const statusMap = {
+    'STATUS_SCHEDULED': 'not started',
+    'STATUS_IN_PROGRESS': 'in progress',
+    'STATUS_HALFTIME': 'halftime',
+    'STATUS_END_PERIOD': bestGame.period === 1 ? 'end of q1' : bestGame.period === 2 ? 'end of q2' : bestGame.period === 3 ? 'end of q3' : 'in progress',
+    'STATUS_FINAL': 'final',
+    'STATUS_FINAL_OVERTIME': 'final',
+  };
+  const status = statusMap[bestGame.statusName] || 'in progress';
+
+  // Map period number to label
+  const periodLabel = bestGame.period > 4 ? `OT${bestGame.period-4}` : bestGame.period > 0 ? `Q${bestGame.period}` : '';
+
+  return {
+    teamA: bestGame.awayTeam,
+    teamB: bestGame.homeTeam,
+    scoreA: bestGame.awayScore,
+    scoreB: bestGame.homeScore,
+    period: periodLabel,
+    clock: bestGame.clock !== '0.0' ? bestGame.clock : '',
+    status,
+    summary: bestGame.shortName + ' · ' + bestGame.shortDetail,
+  };
 }
 
 function handleBotResult(id, res) {
@@ -1035,9 +1090,92 @@ function showToast(gameName, label, sA, sB, winner) {
 }
 
 // ════════════════════════════════════════════════
-//  INIT
+//  PERSISTENCE — localStorage save/load
 // ════════════════════════════════════════════════
-const firstGame = addGame('Game 1');
+const SAVE_KEY = 'squares_app_v1';
+
+function saveState() {
+  const toSave = games.map(g => ({
+    id: g.id, name: g.name, nameManual: g.nameManual||false,
+    teamA: g.teamA, teamB: g.teamB, players: g.players,
+    colOrder: g.colOrder, rowOrder: g.rowOrder, grid: g.grid,
+    results: g.results, currentQuarter: g.currentQuarter,
+    botQuery: g.botQuery, botIntervalMins: g.botIntervalMins,
+  }));
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({games:toSave, activeGameId, nextGameId})); }
+  catch(e) { console.warn('Save failed:',e); }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if(!raw) return false;
+    const saved = JSON.parse(raw);
+    if(!saved.games||!saved.games.length) return false;
+    nextGameId = saved.nextGameId||1;
+    saved.games.forEach(sg => {
+      const g = newGame(sg.name);
+      g.id = sg.id;
+      g.name = sg.name;
+      g.nameManual = sg.nameManual||false;
+      g.teamA = sg.teamA||'Team A';
+      g.teamB = sg.teamB||'Team B';
+      g.players = sg.players||[];
+      g.colOrder = sg.colOrder||[0,1,2,3,4];
+      g.rowOrder = sg.rowOrder||[0,1,2,3,4];
+      g.grid = sg.grid||Array(5).fill(null).map(()=>Array(5).fill(''));
+      g.results = sg.results||[];
+      g.currentQuarter = sg.currentQuarter||1;
+      g.botQuery = sg.botQuery||'';
+      g.botIntervalMins = sg.botIntervalMins||10;
+      games.push(g);
+    });
+    activeGameId = saved.activeGameId||games[0].id;
+    return true;
+  } catch(e) { console.warn('Load failed:',e); return false; }
+}
+
+function endGame(id) {
+  if(!confirm('End this game and delete all its data?')) return;
+  stopBot(id);
+  games = games.filter(g=>g.id!==id);
+  const view = document.getElementById('gview-'+id);
+  if(view) view.remove();
+  if(!games.length) addGame('Game 1');
+  else { renderAllTabs(); switchGame(games[games.length-1].id); }
+  saveState();
+}
+
+// ════════════════════════════════════════════════
+//  INIT — load saved state or start fresh
+// ════════════════════════════════════════════════
+const hadSavedState = loadState();
+
+if(!hadSavedState) {
+  addGame('Game 1');
+} else {
+  renderAllTabs();
+  games.forEach(g => renderGameView(g.id));
+  const view = document.getElementById('gview-'+activeGameId);
+  if(view) view.classList.add('active');
+  games.forEach(g => {
+    refreshScoreUI(g.id);
+    renderHistory(g.id);
+    [1,2,3,4].forEach(q => {
+      const btn = document.getElementById('qbtn-'+g.id+'-'+q);
+      if(!btn) return;
+      btn.classList.remove('active','done');
+      if(g.results.find(r=>r.quarter===q)) btn.classList.add('done');
+      if(q===g.currentQuarter) btn.classList.add('active');
+    });
+  });
+  const bar = document.getElementById('globalBotStatus');
+  if(bar) {
+    bar.textContent = '✓ '+games.length+' game'+(games.length>1?'s':'')+' restored';
+    bar.style.color = 'var(--win)';
+    setTimeout(()=>{ bar.textContent=''; bar.style.color=''; }, 3000);
+  }
+}
 </script>
 </body>
 </html>
