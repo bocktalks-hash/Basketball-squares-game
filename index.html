@@ -199,9 +199,8 @@ small{font-size:0.72rem;color:var(--text-dim);}
 // ════════════════════════════════════════════════
 //  CORE DATA
 // ════════════════════════════════════════════════
-// Each column and row gets one randomly assigned digit (0-9)
-// colDigits[c] = digit for column c, rowDigits[r] = digit for row r
-// All 10 digits split: 5 to columns, 5 to rows (fully randomized)
+const BASE_PAIRS = [[0,5],[1,6],[2,7],[3,8],[4,9]];
+// colOrder/rowOrder: shuffled indices into BASE_PAIRS (independently randomized)
 // Period labels by sport type
 const SPORT_PERIODS = {
   nba:   { periods: 4, labels: {1:'Q1', 2:'Q2', 3:'Q3', 4:'Final'}, short: {1:'Q1',2:'Q2',3:'Q3',4:'Final'} },
@@ -237,8 +236,8 @@ function newGame(name) {
     teamA: 'Team A',
     teamB: 'Team B',
     players: [],
-    colDigits: [0,1,2,3,4],
-    rowDigits: [5,6,7,8,9],
+    colOrder: [0,1,2,3,4],
+    rowOrder: [0,1,2,3,4],
     grid: Array(5).fill(null).map(()=>Array(5).fill('')),
     // Scores
     results: [],
@@ -257,12 +256,11 @@ function newGame(name) {
 }
 
 function shuffle(arr){let a=[...arr];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
-function colDigit(g,c){return g.colDigits[c];}
-function rowDigit(g,r){return g.rowDigits[r];}
-// Legacy wrappers so grid winner detection still works
-function colPair(g,c){const d=colDigit(g,c);return [d];}
-function rowPair(g,r){const d=rowDigit(g,r);return [d];}
-function pairLabel(p){return p[0];}
+function colPair(g,c){return BASE_PAIRS[g.colOrder[c]];}
+function rowPair(g,r){return BASE_PAIRS[g.rowOrder[r]];}
+function colDigit(g,c){return colPair(g,c);}  // returns [d1,d2] array
+function rowDigit(g,r){return rowPair(g,r);}  // returns [d1,d2] array
+function pairLabel(p){return p[0]+' / '+p[1];}
 function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 function getGame(id){return games.find(g=>g.id===id);}
 function getActive(){return getGame(activeGameId);}
@@ -353,7 +351,7 @@ function renderGameView(id) {
         </div>
         <div class="card">
           <h3>Number Pairs</h3>
-          <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:10px;">Each column and row gets one digit (0–9). Hit <strong style="color:var(--accent);">Randomize</strong> to assign them randomly before the game starts.</p>
+          <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:10px;">Each column and row gets a pair of digits. Hit <strong style="color:var(--accent);">Randomize</strong> to shuffle the order independently on each axis before the game starts.</p>
           <div class="flex gap-2 wrap" style="margin-bottom:10px;">
             <button class="btn btn-primary btn-sm" onclick="randomizeNums(${id})">🎲 Randomize</button>
             <button class="btn btn-ghost btn-sm" onclick="resetNums(${id})">Reset</button>
@@ -637,15 +635,14 @@ function renderPairs(id) {
   const g = getGame(id);
   const colEl = document.getElementById('colPairs-'+id);
   const rowEl = document.getElementById('rowPairs-'+id);
-  if(colEl) colEl.innerHTML = g.colDigits.map(d=>`<div class="pair-chip">${d}</div>`).join('');
-  if(rowEl) rowEl.innerHTML = g.rowDigits.map(d=>`<div class="pair-chip">${d}</div>`).join('');
+  if(colEl) colEl.innerHTML = g.colOrder.map(i=>`<div class="pair-chip">${pairLabel(BASE_PAIRS[i])}</div>`).join('');
+  if(rowEl) rowEl.innerHTML = g.rowOrder.map(i=>`<div class="pair-chip">${pairLabel(BASE_PAIRS[i])}</div>`).join('');
 }
 
 function randomizeNums(id) {
   const g = getGame(id);
-  const all = shuffle([0,1,2,3,4,5,6,7,8,9]);
-  g.colDigits = all.slice(0,5);
-  g.rowDigits = all.slice(5,10);
+  g.colOrder = shuffle([0,1,2,3,4]);
+  g.rowOrder = shuffle([0,1,2,3,4]);
   renderPairs(id);
   renderGrid(id);
   saveState();
@@ -653,8 +650,8 @@ function randomizeNums(id) {
 
 function resetNums(id) {
   const g = getGame(id);
-  g.colDigits = [0,1,2,3,4];
-  g.rowDigits = [5,6,7,8,9];
+  g.colOrder = [0,1,2,3,4];
+  g.rowOrder = [0,1,2,3,4];
   renderPairs(id);
   renderGrid(id);
   saveState();
@@ -740,9 +737,9 @@ function renderGrid(id) {
   corner.innerHTML=`<span style="font-size:0.6rem;color:var(--text-dim);text-align:right;line-height:1.6;">↓ ${escHtml(g.teamB)}<br>→ ${escHtml(g.teamA)}</span>`;
   colRow.appendChild(corner);
   for(let c=0;c<5;c++){
-    const cd=colDigit(g,c), d=document.createElement('div');
+    const p=colPair(g,c), d=document.createElement('div');
     d.className='gc-col';
-    d.innerHTML=`<span class="pm" style="color:var(--gold);">${cd}</span><span class="ps">last digit</span>`;
+    d.innerHTML=`<span class="pm" style="color:var(--gold);">${p[0]}<span style="color:var(--text-dim);font-size:0.78rem;"> / </span>${p[1]}</span><span class="ps">last digit</span>`;
     colRow.appendChild(d);
   }
   wrap.appendChild(colRow);
@@ -751,8 +748,8 @@ function renderGrid(id) {
   for(let r=0;r<5;r++){
     const row=document.createElement('div'); row.className='grid-row';
     const rh=document.createElement('div'); rh.className='gc-row';
-    const rd=rowDigit(g,r);
-    rh.innerHTML=`<span class="pm" style="color:var(--gold);">${rd}</span><span class="ps">last digit</span>`;
+    const rp=rowPair(g,r);
+    rh.innerHTML=`<span class="pm" style="color:var(--gold);">${rp[0]}<span style="color:var(--text-dim);font-size:0.78rem;"> / </span>${rp[1]}</span><span class="ps">last digit</span>`;
     row.appendChild(rh);
     for(let c=0;c<5;c++){
       const sq=document.createElement('div'); sq.className='sq';
@@ -760,7 +757,7 @@ function renderGrid(id) {
       if(name){sq.classList.add('taken'); sq.textContent=name;}
       let isWin=false, isPrev=false;
       g.results.forEach((res,idx)=>{
-        if(colDigit(g,c)===res.digitA&&rowDigit(g,r)===res.digitB){
+        if(colPair(g,c).includes(res.digitA)&&rowPair(g,r).includes(res.digitB)){
           if(idx===g.results.length-1) isWin=true; else isPrev=true;
         }
       });
@@ -782,7 +779,8 @@ function clickSquare(id,r,c) {
   if(name){ if(confirm(`Clear "${name}"?`)){ g.grid[r][c]=''; renderGrid(id); renderPlayersList(id); } return; }
   if(!g.players.length){ alert('Add players in Setup first!'); return; }
   pendingSquare={id,r,c};
-  document.getElementById('modalCoords').textContent=`Col: ${colDigit(g,c)} (${g.teamA})  ·  Row: ${rowDigit(g,r)} (${g.teamB})`;
+  const cp2=colPair(g,c), rp2=rowPair(g,r);
+  document.getElementById('modalCoords').textContent=`Col: ${pairLabel(cp2)} (${g.teamA})  ·  Row: ${pairLabel(rp2)} (${g.teamB})`;
   const sel=document.getElementById('modalSelect');
   sel.innerHTML=g.players.map(n=>`<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
   document.getElementById('assignModal').style.display='flex';
@@ -837,17 +835,17 @@ function onScoreInput(id) {
   const ad=a%10, bd=b%10;
   let matchR=-1,matchC=-1,winner='';
   for(let r=0;r<5;r++) for(let c=0;c<5;c++){
-    if(colDigit(g,c)===ad&&rowDigit(g,r)===bd){matchR=r;matchC=c;winner=g.grid[r][c]||'(empty)';}
+    if(colPair(g,c).includes(ad)&&rowPair(g,r).includes(bd)){matchR=r;matchC=c;winner=g.grid[r][c]||'(empty)';}
   }
   const box=document.getElementById('livebox-'+id);
   if(!box) return;
   if(matchR>=0){
-    const cp=colDigit(g,matchC),rp=rowDigit(g,matchR);
+    const cp=colPair(g,matchC),rp=rowPair(g,matchR);
     const col=winner==='(empty)'?'var(--text-dim)':'var(--win)';
     box.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
       <div><div style="font-size:0.68rem;color:var(--text-dim);">Last digits</div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--accent);">${ad} / ${bd}</div></div>
       <div style="color:var(--text-dim);">→</div>
-      <div><div style="font-size:0.68rem;color:var(--text-dim);">Square</div><div style="font-family:'Bebas Neue',sans-serif;font-size:0.9rem;">${cp} · ${rp}</div></div>
+      <div><div style="font-size:0.68rem;color:var(--text-dim);">Square</div><div style="font-family:'Bebas Neue',sans-serif;font-size:0.9rem;">${pairLabel(cp)} · ${pairLabel(rp)}</div></div>
       <div style="color:var(--text-dim);">→</div>
       <div><div style="font-size:0.68rem;color:var(--text-dim);">Winner</div><div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:${col};">${winner}</div></div>
     </div>`;
@@ -870,7 +868,7 @@ function lockQuarter(id) {
   const ad=a%10, bd=b%10;
   let winner='';
   for(let r=0;r<5;r++) for(let c=0;c<5;c++){
-    if(colDigit(g,c)===ad&&rowDigit(g,r)===bd) winner=g.grid[r][c]||'';
+    if(colPair(g,c).includes(ad)&&rowPair(g,r).includes(bd)) winner=g.grid[r][c]||'';
   }
   g.results=g.results.filter(r=>r.quarter!==g.currentQuarter);
   g.results.push({quarter:g.currentQuarter,scoreA:a,scoreB:b,digitA:ad,digitB:bd,winnerName:winner});
@@ -1129,7 +1127,7 @@ function handleBotResult(id, res) {
   const ad=scoreA%10, bd=scoreB%10;
   let winner='';
   for(let r=0;r<5;r++) for(let c=0;c<5;c++){
-    if(colDigit(g,c)===ad&&rowDigit(g,r)===bd) winner=g.grid[r][c]||'(empty)';
+    if(colPair(g,c).includes(ad)&&rowPair(g,r).includes(bd)) winner=g.grid[r][c]||'(empty)';
   }
   const mt=document.getElementById('botmatch-'+id);
   if(mt) mt.innerHTML=winner
@@ -1204,7 +1202,7 @@ function saveState() {
   const toSave = games.map(g => ({
     id: g.id, name: g.name, nameManual: g.nameManual||false,
     teamA: g.teamA, teamB: g.teamB, players: g.players,
-    colDigits: g.colDigits||[0,1,2,3,4], rowDigits: g.rowDigits||[5,6,7,8,9], grid: g.grid,
+    colOrder: g.colOrder||[0,1,2,3,4], rowOrder: g.rowOrder||[0,1,2,3,4], grid: g.grid,
     results: g.results, currentQuarter: g.currentQuarter,
     sport: g.sport||'nba', botQuery: g.botQuery, botIntervalMins: g.botIntervalMins,
   }));
@@ -1227,8 +1225,8 @@ function loadState() {
       g.teamA = sg.teamA||'Team A';
       g.teamB = sg.teamB||'Team B';
       g.players = sg.players||[];
-      g.colDigits = sg.colDigits||sg.colOrder||[0,1,2,3,4];
-      g.rowDigits = sg.rowDigits||sg.rowOrder||[5,6,7,8,9];
+      g.colOrder = sg.colOrder||[0,1,2,3,4];
+      g.rowOrder = sg.rowOrder||[0,1,2,3,4];
       g.grid = sg.grid||Array(5).fill(null).map(()=>Array(5).fill(''));
       g.results = sg.results||[];
       g.currentQuarter = sg.currentQuarter||1;
