@@ -368,11 +368,7 @@ function renderGameView(id) {
         <div class="scoreboard-title">🤖 SCORE BOT</div>
         <div class="flex gap-2 items-center" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
           <input type="text" id="botq-${id}" placeholder='e.g. Lakers vs Celtics or Cowboys vs Eagles' style="flex:1;min-width:160px;margin-bottom:0;" value="${escHtml(g.botQuery)}" oninput="getGame(${id}).botQuery=this.value">
-          <select id="botint-${id}" style="width:110px;margin-bottom:0;" onchange="setBotInterval(${id},parseInt(this.value))">
-            <option value="5">Every 5 min</option>
-            <option value="10" selected>Every 10 min</option>
-            <option value="15">Every 15 min</option>
-          </select>
+          <span id="botinterval-${id}" style="font-size:0.72rem;color:var(--text-dim);padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:7px;">Auto interval</span>
           <button class="btn btn-sm ${g.botRunning?'btn-ghost':'btn-primary'}" id="botbtn-${id}" onclick="toggleBot(${id})">${g.botRunning?'■ Stop':'▶ Start'}</button>
           <button class="btn btn-ghost btn-sm" id="botnow-${id}" onclick="runBotNow(${id})" style="${g.botRunning?'':'display:none'}">↻ Now</button>
         </div>
@@ -903,25 +899,58 @@ function setBotStatus(id, txt, color) {
   if(bar) bar.textContent=running.length?`🤖 Tracking: ${running.join(', ')}`:'';
 }
 
+function getSmartInterval(g) {
+  // Smart interval based on game status
+  const status = g.botLastGameStatus || 'unknown';
+  if (status === 'final') return 300;           // 5 min — game over, no need to check often
+  if (status === 'not started') return 120;     // 2 min — game hasn't started yet
+  if (status === 'in progress') return 30;      // 30 sec — game is live, update fast
+  if (status === 'halftime') return 60;         // 1 min — halftime, moderate
+  if (status.startsWith('end of')) return 60;  // 1 min — between quarters
+  return 60; // default 1 min
+}
+
+function getIntervalLabel(secs) {
+  if (secs < 60) return secs + 's';
+  return (secs / 60) + ' min';
+}
+
 function restartBotTimer(id) {
   const g=getGame(id);
   clearTimeout(g.botIntervalTimer);
   clearInterval(g.botCountdownTimer);
-  g.secondsLeft=g.botIntervalMins*60;
+  const intervalSecs = getSmartInterval(g);
+  g.secondsLeft = intervalSecs;
+  // Update the interval label
+  const lbl = document.getElementById('botinterval-'+id);
+  if(lbl) {
+    const statusLabels = {
+      'in progress': '🔴 Live — updating every 30s',
+      'halftime': '⏸ Halftime — updating every 60s',
+      'not started': '⏳ Pre-game — updating every 2 min',
+      'final': '✓ Final — updating every 5 min',
+    };
+    const status = g.botLastGameStatus || '';
+    lbl.textContent = statusLabels[status] || `Updating every ${getIntervalLabel(intervalSecs)}`;
+    lbl.style.color = status === 'in progress' ? 'var(--win)' : 'var(--text-dim)';
+  }
   tickBotCountdown(id);
   g.botCountdownTimer=setInterval(()=>{
     g.secondsLeft--;
     tickBotCountdown(id);
     if(g.secondsLeft<=0) clearInterval(g.botCountdownTimer);
   },1000);
-  g.botIntervalTimer=setTimeout(()=>{if(g.botRunning) runBotNow(id);},g.botIntervalMins*60*1000);
+  g.botIntervalTimer=setTimeout(()=>{if(g.botRunning) runBotNow(id);}, intervalSecs * 1000);
 }
 
 function tickBotCountdown(id) {
   const g=getGame(id);
-  const m=Math.floor((g.secondsLeft||0)/60), s=(g.secondsLeft||0)%60;
+  const secs = g.secondsLeft||0;
+  const m=Math.floor(secs/60), s=secs%60;
   const el=document.getElementById('botcountdown-'+id);
-  if(el) el.textContent=`Next: ${m}:${String(s).padStart(2,'0')}`;
+  if(!el) return;
+  if(secs <= 0) { el.textContent='Checking...'; return; }
+  el.textContent = m > 0 ? `Next check: ${m}:${String(s).padStart(2,'0')}` : `Next check: ${s}s`;
 }
 
 async function runBotNow(id) {
@@ -1037,6 +1066,9 @@ function handleBotResult(id, res) {
     :`<span style="color:var(--text-dim);">Digits ${ad}/${bd}</span>`;
 
   // Auto-detect quarter end and inject score
+  // Store last known game status for smart interval
+  g.botLastGameStatus = (status||'').toLowerCase();
+
   const stLow=(status||'').toLowerCase();
   const periodKey=stLow+scoreA+scoreB;
   const checkpoints={'end of q1':1,'end of q2':2,'halftime':2,'end of q3':3,'final':4};
